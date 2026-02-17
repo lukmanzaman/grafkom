@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalkulator Interaktif Kurva Bézier</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MathJax for rendering math formulas -->
+    <script>
+        MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
+            svg: {
+                fontCache: 'global'
+            }
+        };
+    </script>
+    <script type="text/javascript" id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js">
+    </script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Fira+Code&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .math-display { font-family: 'Fira Code', monospace; line-height: 2.5; }
+        canvas { 
+            cursor: move; 
+            background-color: #ffffff; 
+            border-radius: 0.5rem;
+            border: 1px solid #e2e8f0;
+        }
+        .control-panel { background-color: white; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+        input[type=number] { width: 70px; text-align: center; border: 1px solid #cbd5e1; border-radius: 0.25rem; padding: 4px; }
+        .t-btn.active { background-color: #4f46e5; color: white; }
+    </style>
+</head>
+<body class="bg-slate-100 p-4 lg:p-8">
+
+    <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- Kolom Kiri: Visualisasi dan Kontrol -->
+        <div class="flex flex-col gap-6">
+            <div class="control-panel">
+                 <h1 class="text-2xl font-bold text-slate-800 mb-4">Visualisasi & Kontrol Bézier</h1>
+                 <p class="text-slate-600 mb-6">Seret titik-titik pada kanvas atau ubah nilainya di bawah ini.</p>
+                 
+                 <div id="control-points-inputs" class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6"></div>
+
+                 <div class="flex flex-col sm:flex-row items-center gap-4">
+                    <div class="flex items-center gap-4 w-full">
+                        <label for="t-slider" class="text-slate-700 font-medium">t = <span id="t-value" class="font-bold">0.50</span></label>
+                        <input id="t-slider" type="range" min="0" max="1" value="0.5" step="0.01" class="w-full">
+                    </div>
+                    <button id="reset-button" class="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow hover:bg-indigo-700 transition-colors w-full sm:w-auto">
+                        Reset
+                    </button>
+                 </div>
+            </div>
+            <canvas id="canvas"></canvas>
+        </div>
+
+        <!-- Kolom Kanan: Perhitungan -->
+        <div class="control-panel">
+            <h2 class="text-2xl font-bold text-slate-800 mb-4">Langkah Perhitungan De Casteljau</h2>
+            <p class="text-slate-600 mb-6">Pilih nilai $t$ untuk melihat detail perhitungannya.</p>
+            <div id="t-buttons" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="calculation-output" class="bg-slate-50 p-4 rounded-lg overflow-x-auto">
+                <p class="text-slate-500">Pilih nilai $t$ di atas untuk memulai.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const tSlider = document.getElementById('t-slider');
+        const tValueSpan = document.getElementById('t-value');
+        const resetButton = document.getElementById('reset-button');
+        const inputsContainer = document.getElementById('control-points-inputs');
+        const tButtonsContainer = document.getElementById('t-buttons');
+        const calcOutput = document.getElementById('calculation-output');
+
+        let controlPoints = [];
+        let t = 0.5;
+        let draggedPointIndex = null;
+        
+        // --- PERUBAHAN 1: Nilai preset awal diperbarui ---
+        const defaultPoints = [
+            { x: 100, y: 100 }, { x: 250, y: 450 },
+            { x: 500, y: 400 }, { x: 550, y: 150 }
+        ];
+
+        function init() {
+            setupInputsAndListeners();
+            setupTButtons();
+            resetState();
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+        }
+
+        function resetState() {
+            controlPoints = JSON.parse(JSON.stringify(defaultPoints));
+            t = 0.5;
+            tSlider.value = 0.5;
+            tValueSpan.textContent = t.toFixed(2);
+            updateAllInputs();
+            draw();
+            updateCalculationDisplay(0.1);
+            
+            const firstButton = tButtonsContainer.querySelector('button');
+            if(firstButton) {
+                document.querySelectorAll('.t-btn').forEach(btn => btn.classList.remove('active'));
+                firstButton.classList.add('active');
+            }
+        }
+        
+        function setupInputsAndListeners(){for(let i=0;i<4;i++){const t=document.createElement("div");t.className="flex flex-col items-center gap-1",t.innerHTML=`\n                    <label class="font-bold text-slate-700">P${i}</label>\n                    <div class="flex gap-1">\n                        <input type="number" id="p${i}x" data-index="${i}" data-axis="x" step="1">\n                        <input type="number" id="p${i}y" data-index="${i}" data-axis="y" step="1">\n                    </div>\n                `,inputsContainer.appendChild(t)}inputsContainer.querySelectorAll("input").forEach(t=>{t.addEventListener("input",handleInputChange)}),resetButton.addEventListener("click",resetState),tSlider.addEventListener("input",handleSliderChange),canvas.addEventListener("mousedown",handleMouseDown),canvas.addEventListener("mousemove",handleMouseMove),canvas.addEventListener("mouseup",handleMouseUp),canvas.addEventListener("mouseleave",handleMouseUp)}
+        function setupTButtons(){for(let t=1;t<10;t++){const e=t/10,n=document.createElement("button");n.className="t-btn bg-white hover:bg-indigo-100 text-indigo-700 font-semibold py-1 px-3 border border-indigo-200 rounded shadow-sm transition-colors",n.textContent=`t=${e.toFixed(1)}`,n.dataset.t=e,n.addEventListener("click",t=>{document.querySelectorAll(".t-btn").forEach(t=>t.classList.remove("active")),t.target.classList.add("active"),updateCalculationDisplay(e)}),tButtonsContainer.appendChild(n)}}
+
+        function handleInputChange(e) {
+            const index = parseInt(e.target.dataset.index);
+            const axis = e.target.dataset.axis;
+            const value = parseFloat(e.target.value);
+            if (!isNaN(value) && controlPoints[index]) {
+                controlPoints[index][axis] = value;
+                draw();
+                updateActiveCalculation();
+            }
+        }
+
+        function updateAllInputs() {
+            for (let i = 0; i < controlPoints.length; i++) {
+                document.getElementById(`p${i}x`).value = Math.round(controlPoints[i].x);
+                document.getElementById(`p${i}y`).value = Math.round(controlPoints[i].y);
+            }
+        }
+        
+        function worldToCanvas(p) { return { x: p.x, y: canvas.height - p.y }; }
+        function canvasToWorld(p) { return { x: p.x, y: canvas.height - p.y }; }
+
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const canvasPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            return canvasToWorld(canvasPos);
+        }
+
+        function handleMouseDown(e) {
+            const worldPos = getMousePos(e);
+            for (let i = 0; i < controlPoints.length; i++) {
+                const p = controlPoints[i];
+                const dist = Math.sqrt((worldPos.x - p.x) ** 2 + (worldPos.y - p.y) ** 2);
+                if (dist < 10) {
+                    draggedPointIndex = i;
+                    return;
+                }
+            }
+        }
+
+        function handleMouseMove(e) {
+            if (draggedPointIndex !== null) {
+                const worldPos = getMousePos(e);
+                controlPoints[draggedPointIndex].x = worldPos.x;
+                controlPoints[draggedPointIndex].y = worldPos.y;
+                updateAllInputs();
+                draw();
+                updateActiveCalculation();
+            }
+        }
+        
+        function handleMouseUp() { draggedPointIndex = null; }
+        
+        function handleSliderChange(e){t=parseFloat(e.target.value),tValueSpan.textContent=t.toFixed(2),draw()}
+        function updateActiveCalculation(){const t=tButtonsContainer.querySelector(".t-btn.active");t&&updateCalculationDisplay(parseFloat(t.dataset.t))}
+        function updateCalculationDisplay(t){if(4!==controlPoints.length)return;let e=`<div class="math-display">`;const[n,o,a,l]=controlPoints.map(t=>({x:Math.round(t.x),y:Math.round(t.y)})),s=(t,e)=>`\\(${e} = (${t.x}, ${t.y})\\)`;e+="<h3>Titik Kontrol Awal:</h3>",e+=`<div>${s(n,"P_0")} &nbsp;&nbsp; ${s(o,"P_1")} &nbsp;&nbsp; ${s(a,"P_2")} &nbsp;&nbsp; ${s(l,"P_3")}</div>`,e+='<h3 class="mt-4">Level 1: Menghitung $Q_0, Q_1, Q_2$</h3>';const i=lerp(n,o,t),d=lerp(o,a,t),c=lerp(a,l,t);e+=`$$ Q_0 = (1 - t) P_0 + t P_1 = (1 - ${t})(${n.x}, ${n.y}) + ${t}(${o.x}, ${o.y}) = (${i.x.toFixed(2)}, ${i.y.toFixed(2)}) $$`,e+=`$$ Q_1 = (1 - t) P_1 + t P_2 = (1 - ${t})(${o.x}, ${o.y}) + ${t}(${a.x}, ${a.y}) = (${d.x.toFixed(2)}, ${d.y.toFixed(2)}) $$`,e+=`$$ Q_2 = (1 - t) P_2 + t P_3 = (1 - ${t})(${a.x}, ${a.y}) + ${t}(${l.x}, ${l.y}) = (${c.x.toFixed(2)}, ${c.y.toFixed(2)}) $$`,e+='<h3 class="mt-4">Level 2: Menghitung $R_0, R_1$</h3>';const r=lerp(i,d,t),p=lerp(d,c,t);e+=`$$ R_0 = (1 - t) Q_0 + t Q_1 = (${r.x.toFixed(2)}, ${r.y.toFixed(2)}) $$`,e+=`$$ R_1 = (1 - t) Q_1 + t Q_2 = (${p.x.toFixed(2)}, ${p.y.toFixed(2)}) $$`,e+='<h3 class="mt-4">Level 3: Menghitung Titik Final $B(t)$</h3>';const u=lerp(r,p,t);e+=`$$ B(${t}) = (1 - t) R_0 + t R_1 = \\mathbf{(${u.x.toFixed(2)}, ${u.y.toFixed(2)})} $$`,e+="</div>",calcOutput.innerHTML=e,MathJax.typesetPromise([calcOutput])}
+
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = Math.max(500, container.clientWidth * 0.75);
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGridAndAxes();
+            if (controlPoints.length !== 4) return;
+            drawBezierCurve(controlPoints);
+            const p = controlPoints;
+            drawLine(p[0], p[1], '#94a3b8', 1);
+            drawLine(p[1], p[2], '#94a3b8', 1);
+            drawLine(p[2], p[3], '#94a3b8', 1);
+            drawDeCasteljauConstruction(controlPoints, t);
+            controlPoints.forEach((p, i) => {
+                drawPoint(p, '#1e293b', 8);
+                drawLabel(p, `P${i}`);
+            });
+        }
+        
+        function drawGridAndAxes() {
+            const gridSpacing = 50; ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += gridSpacing) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+            for (let y = 0; y < canvas.height; y += gridSpacing) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+            const origin = worldToCanvas({ x: 0, y: 0 }); ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(origin.x, 0); ctx.lineTo(origin.x, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, origin.y); ctx.lineTo(canvas.width, origin.y); ctx.stroke();
+            ctx.fillStyle = '#64748b'; ctx.font = '12px Inter';
+            for (let x = gridSpacing; x < canvas.width; x += gridSpacing) { ctx.fillText(x, x + 5, origin.y - 5); }
+            for (let y = gridSpacing; y < canvas.height; y += gridSpacing) { const worldY = canvas.height - y; ctx.fillText(worldY, origin.x + 5, y - 5); }
+        }
+
+        const lerp = (p1, p2, t) => ({ x: (1 - t) * p1.x + t * p2.x, y: (1 - t) * p1.y + t * p2.y });
+        
+        function drawPoint(worldPoint, color = 'black', radius = 5) { const p = worldToCanvas(worldPoint); ctx.beginPath(); ctx.fillStyle = color; ctx.arc(p.x, p.y, radius, 0, 2 * Math.PI); ctx.fill(); }
+        function drawLabel(worldPoint, label) { const p = worldToCanvas(worldPoint); ctx.fillStyle = '#475569'; ctx.font = '14px Inter'; ctx.fillText(label, p.x + 12, p.y + 6); }
+        function drawLine(worldP1, worldP2, color = 'grey', lineWidth = 1) { const p1 = worldToCanvas(worldP1); const p2 = worldToCanvas(worldP2); ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); }
+        function getPointOnBezier(points, t) { if (points.length === 1) return points[0]; const newPoints = []; for (let i = 0; i < points.length - 1; i++) { newPoints.push(lerp(points[i], points[i + 1], t)); } return getPointOnBezier(newPoints, t); }
+
+        function drawBezierCurve(points) {
+            ctx.beginPath(); let p0 = worldToCanvas(points[0]); ctx.moveTo(p0.x, p0.y); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 4;
+            for (let i = 0.01; i <= 1.01; i += 0.01) { const worldP = getPointOnBezier(points, i); const canvasP = worldToCanvas(worldP); ctx.lineTo(canvasP.x, canvasP.y); } ctx.stroke();
+        }
+
+        // --- PERUBAHAN 2: Fungsi ini sekarang menambahkan label untuk Q, R, dan B(t) ---
+        function drawDeCasteljauConstruction(points, t) {
+            const colors = ['#3b82f6', '#10b981', '#f97316']; // blue, green, orange
+            const labels = ['Q', 'R']; // Prefiks label untuk setiap level
+            let currentPoints = points;
+            let level = 0;
+
+            while (currentPoints.length > 1) {
+                const newPoints = [];
+                for (let i = 0; i < currentPoints.length - 1; i++) {
+                    drawLine(currentPoints[i], currentPoints[i + 1], colors[level], 2);
+                    newPoints.push(lerp(currentPoints[i], currentPoints[i + 1], t));
+                }
+                
+                // Gambar titik dan labelnya
+                newPoints.forEach((p, i) => {
+                    drawPoint(p, colors[level], 6);
+                    if (labels[level]) { // Pastikan ada prefiks label untuk level ini
+                        drawLabel(p, `${labels[level]}${i}`);
+                    }
+                });
+
+                currentPoints = newPoints;
+                level++;
+            }
+            
+            // Gambar titik final dan labelnya
+            if (currentPoints.length === 1) {
+                drawPoint(currentPoints[0], '#ef4444', 8); // Titik merah
+                drawLabel(currentPoints[0], 'B(t)');
+            }
+        }
+
+        init();
+    });
+    </script>
+</body>
+</html>
